@@ -39,9 +39,15 @@ class MultiboxLoss(nn.Module):
 
         confidence = confidence[mask, :]
         classification_loss = F.cross_entropy(confidence.reshape(-1, num_classes), labels[mask], size_average=False)
+        # calculate top-1 accuracy
+        predicted_vals = confidence.reshape(-1, num_classes).data
+        ground_truth = labels[mask].data
+        correct_num = (torch.max(predicted_vals, 1)[1] == ground_truth).sum().item()
+        accuracy_top1 = correct_num/ground_truth.size(0) * 100
+
         pos_mask = labels > 0
         predicted_locations = predicted_locations[pos_mask, :].reshape(-1, 4)
         gt_locations = gt_locations[pos_mask, :].reshape(-1, 4)
         smooth_l1_loss = F.smooth_l1_loss(predicted_locations, gt_locations, size_average=False)
         num_pos = gt_locations.size(0)
-        return smooth_l1_loss/num_pos, classification_loss/num_pos
+        return smooth_l1_loss/num_pos, classification_loss/num_pos, accuracy_top1

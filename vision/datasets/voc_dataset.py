@@ -26,7 +26,6 @@ class VOCDataset:
 
         # if the labels file exists, read in the class names
         label_file_name = self.root / "labels.txt"
-
         if os.path.isfile(label_file_name):
             class_string = ""
             with open(label_file_name, 'r') as infile:
@@ -34,7 +33,7 @@ class VOCDataset:
                     class_string += line.rstrip()
 
             # classes should be a comma separated list
-            
+
             classes = class_string.split(',')
             # prepend BACKGROUND as first class
             classes.insert(0, 'BACKGROUND')
@@ -121,6 +120,3 @@ class VOCDataset:
         image = cv2.imread(str(image_file))
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         return image
-
-
-

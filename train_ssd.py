@@ -22,6 +22,7 @@ from vision.ssd.config import vgg_ssd_config
 from vision.ssd.config import mobilenetv1_ssd_config
 from vision.ssd.config import squeezenet_ssd_config
 from vision.ssd.data_preprocessing import TrainAugmentation, TestTransform
+from tensorboardX import SummaryWriter
 
 parser = argparse.ArgumentParser(
     description='Single Shot MultiBox Detector Training With Pytorch')
@@ -106,12 +107,16 @@ if args.use_cuda and torch.cuda.is_available():
     torch.backends.cudnn.benchmark = True
     logging.info("Use Cuda.")
 
+# to use tensorboardX to see training curves
+writer = SummaryWriter('runs/exp-1')
+
 
 def train(loader, net, criterion, optimizer, device, debug_steps=100, epoch=-1):
     net.train(True)
     running_loss = 0.0
     running_regression_loss = 0.0
     running_classification_loss = 0.0
+    accuracy = 0.0
     for i, data in enumerate(loader):
         images, boxes, labels = data
         images = images.to(device)
@@ -120,7 +125,9 @@ def train(loader, net, criterion, optimizer, device, debug_steps=100, epoch=-1):
 
         optimizer.zero_grad()
         confidence, locations = net(images)
-        regression_loss, classification_loss = criterion(confidence, locations, labels, boxes)  # TODO CHANGE BOXES
+        regression_loss, classification_loss, accuracy_top1 = criterion(confidence, locations, labels, boxes)  # TODO CHANGE BOXES
+        if regression_loss != regression_loss or classification_loss != classification_loss:
+            pdb.set_trace()
         loss = regression_loss + classification_loss
         loss.backward()
         optimizer.step()
@@ -128,19 +135,27 @@ def train(loader, net, criterion, optimizer, device, debug_steps=100, epoch=-1):
         running_loss += loss.item()
         running_regression_loss += regression_loss.item()
         running_classification_loss += classification_loss.item()
+        accuracy += accuracy_top1
         if i and i % debug_steps == 0:
             avg_loss = running_loss / debug_steps
             avg_reg_loss = running_regression_loss / debug_steps
             avg_clf_loss = running_classification_loss / debug_steps
+            avg_accuracy = accuracy / debug_steps
             logging.info(
                 f"Epoch: {epoch}, Step: {i}, " +
                 f"Average Loss: {avg_loss:.4f}, " +
                 f"Average Regression Loss {avg_reg_loss:.4f}, " +
-                f"Average Classification Loss: {avg_clf_loss:.4f}"
+                f"Average Classification Loss: {avg_clf_loss:.4f}, " +
+                f"Average Classification Accuracy: {avg_accuracy:.4f}%"
             )
+            writer.add_scalar('training/loss', avg_loss, epoch)
+            writer.add_scalar('training/regression_loss', avg_reg_loss, epoch)
+            writer.add_scalar('training/classification_loss', avg_clf_loss, epoch)
+            writer.add_scalar('training/accuracy', avg_accuracy, epoch)
             running_loss = 0.0
             running_regression_loss = 0.0
             running_classification_loss = 0.0
+            accuracy = 0.0
 
 
 def test(loader, net, criterion, device):
@@ -148,6 +163,7 @@ def test(loader, net, criterion, device):
     running_loss = 0.0
     running_regression_loss = 0.0
     running_classification_loss = 0.0
+    accuracy = 0.0
     num = 0
     for _, data in enumerate(loader):
         images, boxes, labels = data
@@ -158,18 +174,20 @@ def test(loader, net, criterion, device):
 
         with torch.no_grad():
             confidence, locations = net(images)
-            regression_loss, classification_loss = criterion(confidence, locations, labels, boxes)
+            regression_loss, classification_loss, accuracy_top1 = criterion(confidence, locations, labels, boxes)
             loss = regression_loss + classification_loss
 
         running_loss += loss.item()
         running_regression_loss += regression_loss.item()
         running_classification_loss += classification_loss.item()
-    return running_loss / num, running_regression_loss / num, running_classification_loss / num
+        accuracy += accuracy_top1
+    return running_loss / num, running_regression_loss / num, running_classification_loss / num, accuracy / num
 
 
 if __name__ == '__main__':
     timer = Timer()
-
+    import pdb
+    pdb.set_trace()
     logging.info(args)
     if args.net == 'vgg16-ssd':
         create_net = create_vgg_ssd
@@ -317,15 +335,20 @@ if __name__ == '__main__':
         scheduler.step()
         train(train_loader, net, criterion, optimizer,
               device=DEVICE, debug_steps=args.debug_steps, epoch=epoch)
-        
+
         if epoch % args.validation_epochs == 0 or epoch == args.num_epochs - 1:
-            val_loss, val_regression_loss, val_classification_loss = test(val_loader, net, criterion, DEVICE)
+            val_loss, val_regression_loss, val_classification_loss, accuracy = test(val_loader, net, criterion, DEVICE)
             logging.info(
                 f"Epoch: {epoch}, " +
                 f"Validation Loss: {val_loss:.4f}, " +
                 f"Validation Regression Loss {val_regression_loss:.4f}, " +
-                f"Validation Classification Loss: {val_classification_loss:.4f}"
+                f"Validation Classification Loss: {val_classification_loss:.4f}, " +
+                f"Validation Classification Accuracy: {accuracy:.4f}%"
             )
-            model_path = os.path.join(args.checkpoint_folder, f"{args.net}-Epoch-{epoch}-Loss-{val_loss}.pth")
+            writer.add_scalar('validation/loss', val_loss, epoch)
+            writer.add_scalar('validation/regression_loss', val_regression_loss, epoch)
+            writer.add_scalar('validation/classification_loss', val_classification_loss, epoch)
+            writer.add_scalar('validation/accuracy', accuracy, epoch)
+            model_path = os.path.join(args.checkpoint_folder, f"{args.net}-Epoch-{epoch}-Loss-{val_loss}-Accuracy-{accuracy}.pth")
             net.save(model_path)
             logging.info(f"Saved model {model_path}")
